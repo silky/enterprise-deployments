@@ -38,6 +38,7 @@ __author__ = 'richieforeman@google.com (Richie Foreman)'
 
 from argparse import ArgumentParser
 import csv
+import random
 import time
 
 import atom
@@ -45,9 +46,13 @@ import gdata.client
 import gdata.data
 import gdata.gauth
 
+from gdata.apps.multidomain.client import MultiDomainProvisioningClient
+from gdata.client import RequestError
+
 DOMAIN_FEED_TEMPLATE = "/a/feeds/reseller/%s/%s/domain"
 TRANSFER_TOKEN_TEMPLATE = "/a/feeds/reseller/%s/%s/domain/%s/transferToken"
 DOMAIN_ENTRY_TEMPLATE = "/a/feeds/reseller/%s/%s/domain/%s"
+SUSPEND_ENTRY_TEMPALTE = "/a/feeds/reseller/%s/%s/domain/%s/suspend"
 
 class Reseller2Client(gdata.client.GDClient):
     host = "apps-apis.google.com"
@@ -107,6 +112,14 @@ class Reseller2Client(gdata.client.GDClient):
         return self.get_entry(uri=domain_uri,
                               desired_class=gdata.data.GDFeed)
 
+    def get_suspend_status(self, domain):
+        suspend_uri = SUSPEND_ENTRY_TEMPALTE % (self.api_version,
+                                                self.domain,
+                                                domain)
+
+        return self.get_entry(uri=suspend_uri,
+                              desired_class=gdata.data.GDEntry)
+
     def get_transfer_token(self, domain):
         '''
         Given a reseller domain, fetch the transfer token.
@@ -120,9 +133,12 @@ class Reseller2Client(gdata.client.GDClient):
 def main(args):
     client = Reseller2Client(domain=args.domain)
 
-    client.client_login(email=args.admin,
-                        password=args.password,
-                        source="edt-reseller2.0-tokendump")
+    auth_token = client.client_login(email=args.admin,
+                                     password=args.password,
+                                     source="edt-reseller2.0-tokendump")
+
+    prov_client = MultiDomainProvisioningClient(domain=args.domain)
+    prov_client.auth_token = auth_token
 
     writer = csv.DictWriter(open(args.out, 'wb'),
                             fieldnames=[
@@ -132,7 +148,9 @@ def main(args):
                                 'edition',
                                 'maximumNumberOfUsers',
                                 'countryCode',
-                                'creationTime'
+                                'creationTime',
+                                'isSuspended',
+                                'userCount'
                             ])
     writer.writeheader()
 
@@ -151,20 +169,43 @@ def main(args):
         # fetch information about a domain
         domain_entry = client.get_domain(domain=domainName)
 
+        # see if the domain is in a suspended state.
+        isSuspended = "UNKNOWN"
+        for n in range(0, 5):
+            try:
+                suspend_entry = client.get_suspend_status(domainName)
+                isSuspended = suspend_entry._other_elements[1]._other_attributes['value']
+                break
+            except RequestError:
+                time.sleep((2 ** n) + random.random())
+
         # pull out values of interest.
         edition = domain_entry._other_elements[1]._other_attributes['value']
         maximumNumberOfUsers = domain_entry._other_elements[2]._other_attributes['value']
         countryCode = domain_entry._other_elements[3]._other_attributes['value']
         creationTime = domain_entry._other_elements[5]._other_attributes['value']
 
+        # attempt to find the current user count of the entire instance.
+        prov_client.domain = domainName
+        userCount = "UNKNOWN"
+
+        for n in range(0, 5):
+            try:
+                userCount = len(prov_client.retrieve_all_users().entry)
+                break
+            except RequestError:
+                time.sleep((2 ** n) + random.random())
+
         writer.writerow({
-            'domain': domainName,
+            'domain': domainName.encode('ascii', 'ignore'),
             'token': token,
             'expiry': expiry,
             'edition': edition,
             'maximumNumberOfUsers': maximumNumberOfUsers,
-            'countryCode': countryCode,
+            'countryCode': countryCode.encode('ascii', 'ignore'),
             'creationTime': creationTime,
+            'isSuspended': isSuspended,
+            'userCount': userCount
         })
 
         # keep the QPS something reasonable.

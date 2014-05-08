@@ -1,0 +1,54 @@
+application: google.com:rapid-reseller
+version: new
+runtime: python27
+threadsafe: yes
+api_version: 1
+
+default_expiration: 4h
+
+handlers:
+- url: /static
+  static_dir: static
+  secure: always
+
+- url: /favicon\.ico
+  static_files: static/img/favicon.ico
+  upload: static/img/favicon\.ico
+  secure: always
+
+- url: /tasks/.*
+  script: tasks.app
+  secure: always
+  login: admin
+
+- url: .*
+  script: main.app
+  secure: always
+
+libraries:
+- name: pycrypto
+  version: latest
+
+builtins:
+- appstats: on
+
+
+skip_files:
+- ^(.*/)?app\.yaml
+- ^(.*/)?app\.yml
+- ^(.*/)?index\.yaml
+- ^(.*/)?index\.yml
+- ^(.*/)?#.*#
+- ^(.*/)?.*~
+- ^(.*/)?.*\.py[co]
+- ^(.*/)?.*/RCS/.*
+- ^(.*/)?\..*
+- ^(.*/)?.*\.less$
+
+# exclude node, bower, and non-compiled JS.
+- ^(.*/)?node_modules/.*$
+- ^(.*/)?bower_components/.*$
+- ^(.*/)?src/.*$
+
+# exclude Python unit tests.
+- ^(.*/)?tests/.*$
